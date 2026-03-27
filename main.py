@@ -10,6 +10,10 @@ from database import db_handler
 from models import EmailTasks
 
 app = FastAPI()
+ 
+@app.on_event("startup")
+def on_startup():
+    db_handler.create_db_and_tables()
 
 
 def get_gmail_service():

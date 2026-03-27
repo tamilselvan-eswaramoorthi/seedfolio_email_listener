@@ -23,8 +23,6 @@ class Database:
                                     pool_recycle=1800
         )
 
-        self.create_db_and_tables()
-
     def create_db_and_tables(self):
         SQLModel.metadata.create_all(self.engine)
 

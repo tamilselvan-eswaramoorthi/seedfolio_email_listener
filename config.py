@@ -10,8 +10,15 @@ class Config:
     DB_PASSWORD = os.getenv('DB_PASSWORD', '').strip()
     DB_SCHEMA = os.getenv('DB_SCHEMA', 'dbo').strip()
 
-    AUTH_JSON = os.getenv("AUTH_JSON", "{}")
-    AUTH_JSON = json.loads(base64.b64decode(AUTH_JSON))
+    _auth_json_raw = os.getenv("AUTH_JSON", "{}")
+    try:
+        if _auth_json_raw == "{}":
+             AUTH_JSON = {}
+        else:
+             AUTH_JSON = json.loads(base64.b64decode(_auth_json_raw))
+    except Exception as e:
+        print(f"Error decoding AUTH_JSON: {e}")
+        AUTH_JSON = {}
 
     TOPIC_ID = os.getenv("PUB_SUB_TOPIC")
 
