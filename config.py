@@ -13,4 +13,4 @@ class Config:
 
     TOPIC_ID = os.getenv("PUB_SUB_TOPIC")
 
-    USER_EMAIL = os.getenv("USER_EMAIL")
+    USER_EMAIL = os.getenv("USER_EMAIL") 
