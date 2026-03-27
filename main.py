@@ -13,7 +13,10 @@ app = FastAPI()
 
 
 def get_gmail_service():
-    key_dict = json.loads(Config.AUTH_JSON)
+    if isinstance(Config.AUTH_JSON, str):
+        key_dict = json.loads(Config.AUTH_JSON)
+    else:
+        key_dict = Config.AUTH_JSON
         
     scopes = ['https://www.googleapis.com/auth/gmail.readonly']
     

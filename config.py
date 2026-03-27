@@ -1,5 +1,6 @@
 import os
 import json
+import base64
 
 class Config:
     DB_HOST = os.getenv('DB_HOST', '').strip()
@@ -10,6 +11,7 @@ class Config:
     DB_SCHEMA = os.getenv('DB_SCHEMA', 'dbo').strip()
 
     AUTH_JSON = os.getenv("AUTH_JSON", "{}")
+    AUTH_JSON = json.loads(base64.b64decode(AUTH_JSON))
 
     TOPIC_ID = os.getenv("PUB_SUB_TOPIC")
 
