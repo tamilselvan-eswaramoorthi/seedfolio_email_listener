@@ -13,8 +13,11 @@ app = FastAPI()
  
 @app.on_event("startup")
 def on_startup():
-    db_handler.create_db_and_tables()
-
+    try:
+        db_handler.create_db_and_tables()
+        print("Database initialized successfully.")
+    except Exception as e:
+        print(f"Database initialization failed: {e}")
 
 def get_gmail_service():
     if isinstance(Config.AUTH_JSON, str):
@@ -59,7 +62,8 @@ async def pubsub_webhook(request: Request, background_tasks: BackgroundTasks):
         new_task = EmailTasks(
             message_id=msg.get("messageId"),
             history_id=str(data.get("historyId")),
-            email_address=data.get("emailAddress")
+            email_address=data.get("emailAddress"),
+            status="PENDING"
         ) # type: ignore
 
         # 2. Save to your MSSQL database
