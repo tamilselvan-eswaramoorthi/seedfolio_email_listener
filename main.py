@@ -1,6 +1,5 @@
 import base64
 import json
-import os
 from fastapi import FastAPI, Request, Response, BackgroundTasks
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -68,8 +67,18 @@ async def pubsub_webhook(request: Request, background_tasks: BackgroundTasks):
 
         # 2. Save to your MSSQL database
         with db_handler.get_session() as session:
-            session.add(new_task)
-            session.commit()
+            exists = session.query(EmailTasks).filter(EmailTasks.message_id == msg.get("messageId")).first()
+            if not exists:
+                new_task = EmailTasks(
+                    message_id=msg.get("messageId"),
+                    history_id=str(data.get("historyId")),
+                    email_address=data.get("emailAddress"),
+                    status="PENDING"
+                ) # type: ignore
+                session.add(new_task)
+                session.commit()
+            else:
+                print(f"Duplicate message_id {msg.get('messageId')} ignored.")
             
         # 3. Background: Refresh watch every time or conditionally
         background_tasks.add_task(renew_gmail_watch)
