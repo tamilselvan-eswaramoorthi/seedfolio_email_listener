@@ -20,6 +20,6 @@ class Config:
         print(f"Error decoding AUTH_JSON: {e}")
         AUTH_JSON = {}
 
-    TOPIC_ID = os.getenv("PUB_SUB_TOPIC")
-
-    USER_EMAIL = os.getenv("USER_EMAIL") 
+    TOPIC_ID = os.getenv("PUB_SUB_TOPIC", "")
+    USER_EMAIL = os.getenv("USER_EMAIL", "")
+    TRANSACTIONS_USER_ID = os.getenv("TRANSACTIONS_USER_ID", "55e09d20-8fa3-4ddd-88f6-2fc24ab324c9")
