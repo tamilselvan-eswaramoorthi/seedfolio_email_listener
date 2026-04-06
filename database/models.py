@@ -117,11 +117,3 @@ class Bonus(SQLModel, table=True):
     bonus: int = Field(default=1)                              # bonus shares issued
     per: int = Field(default=1)                                # per N existing shares held
     last_updated: datetime = Field(default_factory=datetime.now, nullable=False)
-
-class CASStatus(SQLModel, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
-    user_id: str = Field(foreign_key="user.user_id", max_length=36, unique=True)
-    status: str = Field(default="pending", max_length=20)   # "pending" | "received" | "processed"
-    cas_statement_date: Optional[date] = Field(default=None)
-    last_processed_at: Optional[datetime] = Field(default=None)
-    created_at: datetime = Field(default_factory=datetime.now)

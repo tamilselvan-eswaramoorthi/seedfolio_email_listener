@@ -129,6 +129,7 @@ class CASParser:
         }
 
     def run(self):
+        current_isin = None
         for page_num, page in enumerate(self.doc):
             markers = []
             blocks = page.get_text("blocks")
@@ -176,10 +177,24 @@ class CASParser:
                         is_mf, is_holdings, is_transactions = True, False, False
                         continue
 
-                    
-
                     if is_transactions:
-                        continue
+                        if len(row) > 0:
+                            isin_candidate = normalize_text(row[0])
+                            if re.match(r"^[A-Z]{2}[A-Z0-9]{10}$", isin_candidate):
+                                current_isin = isin_candidate
+                            
+                        if len(row) >= 6 and current_isin:
+                            t_date = normalize_text(row[3])
+                            if re.match(r"^\d{2}-\d{2}-\d{4}$", t_date):
+                                b_qty = parse_number(row[5])
+                                # Add only if it's considered valid bought/brought quantity
+                                if b_qty > 0:
+                                    self.data["transactions"].append({
+                                        "isin": current_isin,
+                                        "date": t_date,
+                                        "brought_quantity": b_qty,
+                                        'broker': self.active_broker.lower() or "UNKNOWN"
+                                    })
 
                     if is_holdings:
                         if "Portfolio Value" in "".join(str(c) for c in row if c):
