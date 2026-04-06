@@ -78,8 +78,8 @@ class EmailTasks(SQLModel, table=True):
     id: int = Field(primary_key=True, max_length=36)
     message_id: str = Field(default=None, index=True, max_length=255)
     history_id: str = Field(default=None, index=True, max_length=255)
-    status: str = Field(default=None, index=True, max_length=20)
-    email_address: str = Field(default=None, index=True, max_length=255)
+    status: str = Field(default=None, max_length=20)
+    email_address: str = Field(default=None, max_length=255, nullable=True)
     created_at: datetime = Field(default_factory=datetime.now, nullable=False)
 
 

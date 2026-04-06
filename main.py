@@ -1,6 +1,6 @@
 import base64
 import json
-import re
+import traceback
 from fastapi import FastAPI, Request, Response, BackgroundTasks
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -69,23 +69,51 @@ async def pubsub_webhook(request: Request, background_tasks: BackgroundTasks):
 
         history_id = data.get('historyId')
 
-        # 2. Get the history record from Gmail
-        history = gmail.service.users().history().list(userId='me', startHistoryId=3228).execute()
-        message_ids = []
-        print (history)
-        if 'history' in history:
-            for record in history['history']:
-                print (record)
-                if 'messages' in record:
-                    for message_item in record['messages']:
-                        message_id = message_item['id']
-                        message_ids.append(message_id)
-        message_ids = set(message_ids)
-        print (f"Extracted message IDs from history: {message_ids} for history ID: {history_id}")
-        for message_id in message_ids:
-            print(f"Processing message ID: {message_id} from history ID: {history_id}")
-            gmail.process_transactions(message_id, history_id)
+        with db_handler.get_session() as session:
+            last_history_id = session.exec(select(EmailTasks.history_id).order_by(EmailTasks.history_id.desc())).first()
+            if last_history_id:
+                if history_id < last_history_id:
+                    print(f"Ignoring message with history ID {history_id} as it's older than last processed history ID {last_history_id}")
+                    return Response(status_code=200)
+            else:
+                results = gmail.service.users().getProfile(userId='me').execute()
+                initial_task = EmailTasks(message_id="INITIAL", history_id=results['historyId'], status="INITIAL") #type: ignore
+                session.add(initial_task)
+                session.commit()
+                return Response(status_code=200)
             
+            # 2. Get the history record from Gmail
+            history = gmail.service.users().history().list(userId='me', startHistoryId=last_history_id).execute()
+            message_ids = []
+            if 'history' in history:
+                for record in history['history']:
+                    if 'messagesAdded' in record:
+                        for message_item in record['messagesAdded']:
+                            message_id = message_item['message']['id']
+                            message_ids.append(message_id)
+            message_ids = set(message_ids)
+
+            unprocessed_message_ids = []
+            for message_id in message_ids:
+                task_exists = session.exec(select(EmailTasks).where(EmailTasks.message_id == message_id)).first()
+                if task_exists:
+                    continue
+                unprocessed_message_ids.append(message_id)
+
+            for message_id in unprocessed_message_ids:
+                task = EmailTasks(message_id=message_id, history_id=history_id, status="PROCESSING") #type: ignore
+                session.add(task) 
+
+                ret = gmail.process_transactions(message_id)
+                if ret.get('status') == 202 or ret.get('status') == 500:
+                    with db_handler.get_session() as session:
+                        task = session.exec(select(EmailTasks).where(EmailTasks.message_id == message_id)).first()
+                        if task:
+                            task.status = "COMPLETED"
+                            session.add(task)
+
+                session.commit()
+
         # # 3. Background: Refresh watch every time or conditionally
         # background_tasks.add_task(renew_gmail_watch)
 
@@ -93,6 +121,7 @@ async def pubsub_webhook(request: Request, background_tasks: BackgroundTasks):
 
     except Exception as e:
         print(f"Error processing webhook: {e}")
+        traceback.print_exc()
         return Response(status_code=200)
 
 @app.get("/health")

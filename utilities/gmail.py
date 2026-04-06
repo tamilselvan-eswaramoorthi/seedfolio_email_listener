@@ -378,20 +378,30 @@ class GetHoldingsFromGmail:
             session.add(cas_status)
             session.commit()
 
-    def process_transactions(self, message_id: str, history_id: str):
+    def process_transactions(self, message_id: str):
         """Process email transactions.
 
         Args:
             message_id (str): The ID of the email message to process.
         """
 
-        msg = self.service.users().messages().get(userId="me", id=message_id).execute() # type: ignore
-        attachments = self.get_attachments_in_memory("me", msg['id'], msg.get("payload", {}))
-        sender = self._extract_forwarded_from(msg)
+        try:
+            msg = self.service.users().messages().get(userId="me", id=message_id).execute() # type: ignore
+        except Exception as e:
+            print(f"Error fetching message {message_id}: {e}")
+            return {'status': 500, 'message': f"Error fetching message: {e}"}
         
-        #extract user email from message headers
         user_email = msg.get("payload", {}).get("headers", [])
         user_email = next((h.get("value") for h in user_email if h.get("name", "").lower() == "from"), None)
+
+        attachments = self.get_attachments_in_memory("me", msg['id'], msg.get("payload", {}))
+        sender = self._extract_forwarded_from(msg)
+
+        if not sender:
+            print(f"Could not determine sender for message ID: {message_id}")
+            return {'status': 500, 'message': f"Could not determine sender for message ID: {message_id}"}
+        
+        #extract user email from message headers
         if user_email and "<" in user_email and ">" in user_email:
             match = re.search(r'<(.*?)>', user_email)
             if match:
@@ -405,23 +415,9 @@ class GetHoldingsFromGmail:
                     self._get_user_details(self.user_id)
                 else:
                     print(f"No user found for email: {user_email}")
-                    return
+                    return {'status': 202, 'message': f"No user found for email: {user_email}"}
+                
         print (f"Email from: {sender}, User email: {user_email}, Attachments found: {len(attachments)}")
-        with db_handler.get_session() as session:
-            exists = session.query(EmailTasks).filter(EmailTasks.history_id == history_id).first()
-            if not exists:
-                new_task = EmailTasks(
-                    message_id=message_id,
-                    history_id=history_id, 
-                    email_address=user_email.lower() if user_email else None,
-                    status="PENDING"
-                ) # type: ignore
-                session.add(new_task)
-                session.commit()
-            else:
-                print(f"Duplicate message_id {msg.get('messageId')} ignored.")
-                return
-
 
         email_sent_time = msg.get("internalDate")
         email_sent_date = datetime.fromtimestamp(int(email_sent_time) / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
@@ -445,6 +441,11 @@ class GetHoldingsFromGmail:
                             self._save_transactions(extractions)
                     else:
                         print(f"Unknown sender: {sender}, skipping.")
+
+            return {'status': 200, 'message': "Processing completed."}
+        else:
+            print(f"No attachments found in message ID: {message_id}")
+            return {'status': 202, 'message': "No attachments found."}
 
     def _fill_missing_transactions(self, extractions, cas_holdings):
         """ For each holding in CAS, find the corresponding extractions and group by broker """
