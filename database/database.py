@@ -14,14 +14,12 @@ class Database:
                 f"?driver={driver}"
                 f"&Encrypt=yes&TrustServerCertificate=yes&Connection Timeout=30"
             )
-        elif Config.DB_HOST == "localhost":
+        else:
             # Local MySQL connection string
             db_conn_str = (
                 f"mysql+pymysql://{Config.DB_USER}:{password}"
                 f"@{Config.DB_HOST}:{Config.DB_PORT}/{Config.DB_NAME}"
             )
-        else:
-            raise ValueError("Unsupported DB_HOST. Must be either Azure SQL or localhost for MySQL.")
         self.engine = create_engine(db_conn_str, 
                                     echo=False,
                                     poolclass=QueuePool,
