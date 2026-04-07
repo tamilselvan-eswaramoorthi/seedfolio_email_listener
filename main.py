@@ -72,7 +72,7 @@ async def pubsub_webhook(request: Request, background_tasks: BackgroundTasks):
         with db_handler.get_session() as session:
             last_history_id = session.exec(select(EmailTasks.history_id).order_by(EmailTasks.history_id.desc())).first()
             if last_history_id:
-                if history_id < last_history_id:
+                if int(history_id) < int(last_history_id):
                     print(f"Ignoring message with history ID {history_id} as it's older than last processed history ID {last_history_id}")
                     return Response(status_code=200)
             else:
@@ -101,7 +101,7 @@ async def pubsub_webhook(request: Request, background_tasks: BackgroundTasks):
                 unprocessed_message_ids.append(message_id)
 
             for message_id in unprocessed_message_ids:
-                task = EmailTasks(message_id=message_id, history_id=history_id, status="PROCESSING") #type: ignore
+                task = EmailTasks(message_id=message_id, history_id=str(history_id), status="PROCESSING") #type: ignore
                 session.add(task) 
 
                 ret = gmail.process_transactions(message_id)
