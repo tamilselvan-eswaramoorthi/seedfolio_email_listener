@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # 1. Start the Cloudflare Access bridge in the background
-# This maps database.knotwealth.com to localhost:3307 inside the container
-cloudflared tunnel access tcp --hostname database.knotwealth.com --listener localhost:3307 &
+# This maps database.knotwealth.com to localhost:${DB_PORT:-3306} inside the container
+cloudflared tunnel access tcp --hostname database.knotwealth.com --listener localhost:${DB_PORT:-3306} &
 
 # 2. Wait a moment for the bridge to initialize
 sleep 5
