@@ -2,6 +2,8 @@ import base64
 import re
 import json
 import uuid
+import email as email_lib
+from email import policy as email_policy
 from sqlmodel import select
 
 from datetime import datetime, timezone
@@ -19,6 +21,8 @@ class GetHoldingsFromGmail:
     def __init__(self):
         self.service = None
         self.extractor = ExtractHoldings()
+        self.user_id = None
+        self.PASSWORD = None
         self.SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
         self.authenticate()
         self.zerodha_query = "from:no-reply-transaction-with-holding-statement@reportsmailer.zerodha.net"
@@ -139,33 +143,97 @@ class GetHoldingsFromGmail:
                 text += self._get_full_body_text(part)
         return text
 
-    def _detect_broker_from_email(self, msg):
-        payload = msg.get("payload", {})
-        body_text = self._get_full_body_text(payload).lower()
-        if "zerodha" in body_text:
+    def _detect_broker_from_text(self, text: str):
+        text_lower = text.lower()
+        if "zerodha" in text_lower:
             return "Zerodha"
-        if "groww" in body_text:
+        if "groww" in text_lower:
             return "Groww"
-        if "angleone" in body_text or "angelone" in body_text:
+        if "angleone" in text_lower or "angelone" in text_lower:
             return "AngelOne"
         return None
 
-    def _extract_nse_date(self, msg):
-        payload = msg.get('payload', {})
-        full_text = self._get_body_text(payload)
-        
+    def _detect_broker_from_email(self, msg):
+        payload = msg.get("payload", {})
+        body_text = self._get_full_body_text(payload).lower()
+        return self._detect_broker_from_text(body_text)
+
+    def _extract_nse_date_from_text(self, full_text: str):
         match = re.search(r"for   (\d{1,2}-[A-Z]{3,}-\d{4})", full_text)
         if match:
             date_str = match.group(1)
             try:
-                # Convert 13-MAR-2026 to 2026-03-13 for standard ISO format
                 from datetime import datetime
                 dt = datetime.strptime(date_str, "%d-%b-%Y")
                 return dt.strftime("%Y-%m-%d")
             except:
                 return date_str
         return None
+
+    def _extract_nse_date(self, msg):
+        payload = msg.get('payload', {})
+        full_text = self._get_body_text(payload)
+        return self._extract_nse_date_from_text(full_text)
+
+    def _extract_info_from_eml(self, eml_data):
+        msg = email_lib.message_from_bytes(eml_data, policy=email_policy.default)
+
+        sender = ""
+        # Check headers
+        headers_to_check = ["X-Forwarded-For", "X-Original-From", "Return-Path", "From"]
+        for h in headers_to_check:
+            val = msg.get(h)
+            if val:
+                match = re.search(r'[\w\.-]+@[\w\.-]+', str(val))
+                if match:
+                    sender = match.group(0).lower()
+                    break
         
+        body_text = ""
+        attachments = []
+        for part in msg.walk():
+            content_type = part.get_content_type()
+            disposition = part.get('Content-Disposition')
+            
+            if content_type == "text/plain" and not disposition:
+                payload = part.get_payload(decode=True)
+                if isinstance(payload, bytes):
+                    body_text += payload.decode(errors='ignore')
+            elif disposition:
+                filename = part.get_filename()
+                if filename:
+                    attachments.append({
+                        "filename": filename,
+                        "data": part.get_payload(decode=True)
+                    })
+        
+        # Check body for "from:" (forwarded)
+        if body_text:
+            match = re.search(r"from:.*?([\w\.-]+@[\w\.-]+)", body_text, re.IGNORECASE)
+            if match:
+                sender = match.group(1).lower()
+
+        # Date extraction
+        eml_date = self._extract_nse_date_from_text(body_text)
+        if not eml_date:
+            date_header = msg.get("Date")
+            if date_header:
+                try:
+                    import email.utils
+                    dt_tuple = email.utils.parsedate_tz(str(date_header))
+                    if dt_tuple:
+                        from datetime import datetime
+                        dt = datetime.fromtimestamp(email.utils.mktime_tz(dt_tuple))
+                        eml_date = dt.strftime("%Y-%m-%d")
+                except:
+                    pass
+                    
+        return {
+            "sender": sender,
+            "date": eml_date,
+            "attachments": attachments,
+            "body": body_text
+        }
 
     # ------------------------------------------------------------------
     # Core incremental processing
@@ -373,31 +441,45 @@ class GetHoldingsFromGmail:
         broker_name = self._detect_broker_from_email(msg)
         
         any_new_data = False
-        
-        if attachments:
-            for att in attachments:
-                if str(att["filename"]).lower().endswith(".pdf"):
-                    if sender == 'ecas@cdslstatement.com':
+
+        def process_attachment_recursive(current_sender, current_attachments, current_date, current_broker):
+            nonlocal any_new_data
+            for att in current_attachments:
+                filename = str(att["filename"]).lower()
+                if filename.endswith(".pdf"):
+                    if current_sender == 'ecas@cdslstatement.com':
                         holdings = self.extractor.extract_cas_pdf(att["data"], self.PASSWORD)
                         new_txns = process_and_reconcile_from_cas(holdings, self.user_id)
                         if new_txns:
                             self._save_transactions(new_txns)
                             any_new_data = True
-                    elif sender in ['nse-direct@nse.co.in']:
-                        email_date = self._extract_nse_date(msg)
-                        if email_date is None:
-                            email_date = email_sent_date
-                        extractions = self.extractor.extract_nse_pdf(att["data"], self.PASSWORD, email_date)
+                    elif current_sender in ['nse-direct@nse.co.in', 'nse-direct@uci.nse.co.in']:
+                        if current_date is None:
+                            current_date = email_sent_date
+                        extractions = self.extractor.extract_nse_pdf(att["data"], self.PASSWORD, current_date)
                         if extractions is not None:
                             self._save_transactions(extractions)
                             any_new_data = True
-                    elif sender == 'mgrpt@bseindia.com':
-                        extractions = self.extractor.extract_bse_pdf(att["data"], self.PASSWORD, broker_name)
+                    elif current_sender == 'mgrpt@bseindia.com':
+                        extractions = self.extractor.extract_bse_pdf(att["data"], self.PASSWORD, current_broker)
                         if extractions is not None:
                             self._save_transactions(extractions)
                             any_new_data = True
                     else:
-                        print(f"Unknown sender: {sender}, skipping.")
+                        print(f"Unknown sender: {current_sender}, skipping attachment: {filename}")
+                elif filename.endswith(".eml"):
+                    print(f"Processing nested EML: {filename}")
+                    eml_info = self._extract_info_from_eml(att["data"])
+                    eml_broker = self._detect_broker_from_text(eml_info["body"]) or current_broker
+                    process_attachment_recursive(
+                        eml_info["sender"],
+                        eml_info["attachments"],
+                        eml_info["date"] or current_date,
+                        eml_broker
+                    )
+
+        if attachments:
+            process_attachment_recursive(sender, attachments, email_sent_date, broker_name)
 
             if any_new_data:
                 self._calculate_and_upsert_holdings()

@@ -92,7 +92,7 @@ async def pubsub_webhook(request: Request, background_tasks: BackgroundTasks):
                             message_id = message_item['message']['id']
                             message_ids.append(message_id)
             message_ids = set(message_ids)
-
+            print(f"Found {len(message_ids)} new message IDs in history since last history ID {last_history_id}")
             unprocessed_message_ids = []
             for message_id in message_ids:
                 task_exists = session.exec(select(EmailTasks).where(EmailTasks.message_id == message_id)).first()
@@ -105,7 +105,7 @@ async def pubsub_webhook(request: Request, background_tasks: BackgroundTasks):
                 session.add(task) 
 
                 ret = gmail.process_transactions(message_id)
-                if ret.get('status') == 202 or ret.get('status') == 500:
+                if ret.get('status') == 202 or ret.get('status') == 500 or ret.get('status') == 200:
                     with db_handler.get_session() as session:
                         task = session.exec(select(EmailTasks).where(EmailTasks.message_id == message_id)).first()
                         if task:
@@ -115,7 +115,7 @@ async def pubsub_webhook(request: Request, background_tasks: BackgroundTasks):
                 session.commit()
 
         # # 3. Background: Refresh watch every time or conditionally
-        # background_tasks.add_task(renew_gmail_watch)
+        background_tasks.add_task(renew_gmail_watch)
 
         return Response(status_code=200)
 
