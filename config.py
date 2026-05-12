@@ -22,4 +22,4 @@ class Config:
 
     TOPIC_ID = os.getenv("PUB_SUB_TOPIC", "")
     USER_EMAIL = os.getenv("USER_EMAIL", "")
-    TRANSACTIONS_USER_ID = os.getenv("TRANSACTIONS_USER_ID", "55e09d20-8fa3-4ddd-88f6-2fc24ab324c9")
+    TRANSACTIONS_USER_ID = os.getenv("TRANSACTIONS_USER_ID")

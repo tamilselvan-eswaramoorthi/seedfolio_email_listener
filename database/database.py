@@ -14,6 +14,11 @@ class Database:
                 f"?driver={driver}"
                 f"&Encrypt=yes&TrustServerCertificate=yes&Connection Timeout=30"
             )
+        elif ".supabase.co" in Config.DB_HOST or ".pooler.supabase.com" in Config.DB_HOST or Config.DB_USER == "postgres":
+            db_conn_str = (
+                f"postgresql+psycopg2://{Config.DB_USER}:{password}"
+                f"@{Config.DB_HOST}:{Config.DB_PORT}/{Config.DB_NAME}?sslmode=require"
+            )
         else:
             # Local MySQL connection string
             db_conn_str = (

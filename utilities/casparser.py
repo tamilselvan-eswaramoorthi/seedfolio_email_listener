@@ -4,11 +4,16 @@ def normalize_text(s):
     if not s:
         return ""
     s = " ".join(s.split())
-    if "ISIN" in s.upper() or "IISSIINN" in s.upper(): return "ISIN"
-    if "SECURITY" in s.upper() or "SSEECCUURRIITTYY" in s.upper(): return "SECURITY"
-    if "TRANSACTION" in s.upper() or "TTRRAANNSSAACCTTIIOONN" in s.upper(): return "TRANSACTION"
-    if "PARTICULARS" in s.upper() or "PPAARRTTIICCUULLAARRSS" in s.upper(): return "PARTICULARS"
-    if "TTRRAANNSSAACCTTIIOONN\nPPAARRTTIICCUULLAARRSS" in s.upper().replace(" ", ""): return "TRANSACTION PARTICULARS"
+    if "ISIN" in s.upper() or "IISSIINN" in s.upper():
+        return "ISIN"
+    if "SECURITY" in s.upper() or "SSEECCUURRIITTYY" in s.upper():
+        return "SECURITY"
+    if "TRANSACTION" in s.upper() or "TTRRAANNSSAACCTTIIOONN" in s.upper():
+        return "TRANSACTION"
+    if "PARTICULARS" in s.upper() or "PPAARRTTIICCUULLAARRSS" in s.upper():
+        return "PARTICULARS"
+    if "TTRRAANNSSAACCTTIIOONN\nPPAARRTTIICCUULLAARRSS" in s.upper().replace(" ", ""):
+        return "TRANSACTION PARTICULARS"
     return s
 
 
@@ -80,19 +85,23 @@ class CASParser:
         return None
 
     def is_transactions_header(self, row):
-        if len(row) < 7: return False
+        if len(row) < 7:
+            return False
         cell0 = normalize_text(row[2]).upper()
         return "TRANSACTION" in cell0 or "PARTICULARS" in cell0 or "TRANSACTION PARTICULARS" in cell0
 
     def is_holdings_header(self, row):
-        if not self.seen_holdings_date_header: return False
-        if len(row) < 7: return False
+        if not self.seen_holdings_date_header:
+            return False
+        if len(row) < 7: 
+            return False
         cell0 = normalize_text(row[0]).upper()
         cell1 = normalize_text(row[1]).upper()
         return "ISIN" in cell0 and "SECURITY" in cell1
 
     def is_mf_header(self, row):
-        if len(row) < 7: return False
+        if len(row) < 7:
+            return False
         cell0 = normalize_text(row[0]).upper()
         return "SCHEME NAME" in cell0 or "MUTUAL FUND UNITS" in cell0
 
@@ -161,12 +170,14 @@ class CASParser:
                         self.active_broker = m['value']
                 
                 rows = table.extract()
-                if not rows: continue
+                if not rows:
+                    continue
                 
                 is_holdings, is_mf, is_transactions = False, False, False
 
                 for row in rows:
-                    if not any(row): continue
+                    if not any(row):
+                        continue
                     if self.is_transactions_header(row):
                         is_transactions, is_holdings, is_mf = True, False, False
                         continue
@@ -207,7 +218,8 @@ class CASParser:
                                 if not any(h['isin'] == parsed['isin'] for h in self.data[key]):
                                     self.data[key].append(parsed)
                             else:
-                                if "other" not in self.data: self.data["other"] = []
+                                if "other" not in self.data:
+                                    self.data["other"] = []
                                 if not any(h['isin'] == parsed['isin'] for h in self.data["other"]):
                                     self.data["other"].append(parsed)
 
