@@ -1,13 +1,11 @@
-import base64
 import json
-import traceback
 from fastapi import FastAPI, Request, Response, BackgroundTasks
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from sqlmodel import select
 
 from config import Config
-from database import db_handler, User, EmailTasks
+from database import db_handler, EmailTasks
 from utilities.gmail import GetHoldingsFromGmail
 
 app = FastAPI()
@@ -47,82 +45,45 @@ def renew_gmail_watch():
 
 
 @app.post("/process")
-async def pubsub_webhook(request: Request, background_tasks: BackgroundTasks):
-    """Main entry point for Pub/Sub push notifications"""
-    envelope = await request.json()
+async def process_webhook(request: Request, background_tasks: BackgroundTasks):
+    """Main entry point for apps Script calls"""
+    payload = await request.json()
     
-    if not envelope or "message" not in envelope:
-        return Response(content="Invalid Pub/Sub message", status_code=400)
+    if not payload:
+        return Response(content="Invalid request", status_code=400)
 
-    msg = envelope["message"]
-    
-    # 1. Decode Gmail payload
-    try:
-        if isinstance(msg.get("data"), str):
-            data_str = base64.b64decode(msg.get("data")).decode("utf-8")
-            data = json.loads(data_str)
-        else:
-            data = msg.get("data", {})
+    # 1. Handle Direct Message ID (e.g., from Google Apps Script)
+    if "messageId" in payload:
+        message_id = payload["messageId"]
+        print(f"Received direct request for message ID: {message_id}")
+        
+        with db_handler.get_session() as session:
+            # Check if already processed
+            task_exists = session.exec(select(EmailTasks).where(EmailTasks.message_id == message_id)).first()
+            if task_exists and task_exists.status == "COMPLETED":
+                print(f"Message ID {message_id} already processed.")
+                return Response(status_code=200)
 
+            if not task_exists:
+                task = EmailTasks(message_id=message_id, status="PROCESSING")
+                session.add(task)
+                session.commit()
+
+        # Process outside of the initial session to avoid keeping transaction open
         gmail = GetHoldingsFromGmail()
-
-
-        history_id = data.get('historyId')
+        ret = gmail.process_transactions(message_id)
+        print(f"Processing result for message ID {message_id}: {ret}")
 
         with db_handler.get_session() as session:
-            last_history_id = session.exec(select(EmailTasks.history_id).order_by(EmailTasks.history_id.desc())).first()
-            if last_history_id:
-                if int(history_id) < int(last_history_id):
-                    print(f"Ignoring message with history ID {history_id} as it's older than last processed history ID {last_history_id}")
-                    return Response(status_code=200)
-            else:
-                results = gmail.service.users().getProfile(userId='me').execute()
-                initial_task = EmailTasks(message_id="INITIAL", history_id=results['historyId'], status="INITIAL") #type: ignore
-                session.add(initial_task)
+            task = session.exec(select(EmailTasks).where(EmailTasks.message_id == message_id)).first()
+            if task:
+                task.status = "COMPLETED"
+                session.add(task)
                 session.commit()
-                return Response(status_code=200)
-            
-            # 2. Get the history record from Gmail
-            history = gmail.service.users().history().list(userId='me', startHistoryId=last_history_id).execute()
-            message_ids = []
-            if 'history' in history:
-                for record in history['history']:
-                    if 'messagesAdded' in record:
-                        for message_item in record['messagesAdded']:
-                            message_id = message_item['message']['id']
-                            message_ids.append(message_id)
-            message_ids = set(message_ids)
-            print(f"Found {len(message_ids)} new message IDs in history since last history ID {last_history_id}")
-            unprocessed_message_ids = []
-            for message_id in message_ids:
-                task_exists = session.exec(select(EmailTasks).where(EmailTasks.message_id == message_id)).first()
-                if task_exists:
-                    continue
-                unprocessed_message_ids.append(message_id)
-
-            for message_id in unprocessed_message_ids:
-                task = EmailTasks(message_id=message_id, history_id=str(history_id), status="PROCESSING") #type: ignore
-                session.add(task) 
-
-                ret = gmail.process_transactions(message_id)
-                if ret.get('status') == 202 or ret.get('status') == 500 or ret.get('status') == 200:
-                    with db_handler.get_session() as session:
-                        task = session.exec(select(EmailTasks).where(EmailTasks.message_id == message_id)).first()
-                        if task:
-                            task.status = "COMPLETED"
-                            session.add(task)
-
-                session.commit()
-
-        # # 3. Background: Refresh watch every time or conditionally
         background_tasks.add_task(renew_gmail_watch)
-
         return Response(status_code=200)
-
-    except Exception as e:
-        print(f"Error processing webhook: {e}")
-        traceback.print_exc()
-        return Response(status_code=200)
+    else:
+        return Response(content="Unsupported payload format", status_code=400)
 
 @app.get("/health")
 def health_check():
