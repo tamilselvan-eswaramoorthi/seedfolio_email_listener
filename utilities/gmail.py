@@ -420,7 +420,7 @@ class GetHoldingsFromGmail:
             return {'status': 500, 'message': f"Error fetching message: {e}"}
         
         user_email = msg.get("payload", {}).get("headers", [])
-        user_email = next((h.get("value") for h in user_email if h.get("name", "").lower() == "from"), None)
+        user_email = next((h.get("value") for h in user_email if h.get("Delivered-To", "").lower() == "from"), None)
 
         attachments = self.get_attachments_in_memory("me", msg['id'], msg.get("payload", {}))
         sender = self._extract_forwarded_from(msg)
