@@ -75,31 +75,6 @@ class GetHoldingsFromGmail:
                     
         self.service = build("gmail", "v1", credentials=creds)
 
-    def _extract_forwarded_from(self, gmail_msg: dict) -> str:
-        payload = gmail_msg.get("payload", {})
-        headers = payload.get("headers", [])
-        for header in headers:
-            name = header.get("name", "").lower()
-            value = header.get("value", "").lower()
-            if name in ["x-forwarded-to", "x-original-from"]:
-                match = re.search(r'[\w\.-]+@[\w\.-]+', value)
-                if match:
-                    return match.group(0)
-
-        full_text = self._get_full_body_text(payload)
-        match = re.search(r"from:.*?([\w\.-]+@[\w\.-]+)", full_text, re.IGNORECASE)
-        if match:
-            return match.group(1).lower()
-
-        for header in headers:
-            name = header.get("name", "").lower()
-            value = header.get("value", "").lower()
-            if name == "from":
-                match = re.search(r'[\w\.-]+@[\w\.-]+', value)
-                if match:
-                    return match.group(0)
-        return ""
-
     def get_attachments_in_memory(self, user_id, msg_id, payload):
         attachments = []
         
@@ -419,11 +394,19 @@ class GetHoldingsFromGmail:
             print(f"Error fetching message {message_id}: {e}")
             return {'status': 500, 'message': f"Error fetching message: {e}"}
         
-        user_email = msg.get("payload", {}).get("headers", [])
-        user_email = next((h.get("value") for h in user_email if h.get("Delivered-To", "").lower() == "from"), None)
+        sender = None
+        user_email = None
+        for h in msg.get("payload", {}).get("headers", []):
+            name = h.get("name", "").lower()
+            value = h.get("value", "").lower()
+            if name in ['to', 'delivered-to', 'x-original-to']:
+                user_email = value
+            if name in ["from"]:
+                match = re.search(r'[\w\.-]+@[\w\.-]+', value)
+                if match:
+                    sender = match.group(0)
 
         attachments = self.get_attachments_in_memory("me", msg['id'], msg.get("payload", {}))
-        sender = self._extract_forwarded_from(msg)
 
         if not sender:
             print(f"Could not determine sender for message ID: {message_id}")
