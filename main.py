@@ -1,10 +1,6 @@
-import json
 from fastapi import Body, FastAPI,Response
-from google.oauth2 import service_account
-from googleapiclient.discovery import build
 from sqlmodel import select
 
-from config import Config
 from database import db_handler, EmailTasks
 from utilities.gmail import GetHoldingsFromGmail
 
@@ -17,31 +13,6 @@ def on_startup():
         print("Database initialized successfully.")
     except Exception as e:
         print(f"Database initialization failed: {e}")
-
-def get_gmail_service():
-    if isinstance(Config.AUTH_JSON, str):
-        key_dict = json.loads(Config.AUTH_JSON)
-    else:
-        key_dict = Config.AUTH_JSON
-        
-    scopes = ['https://www.googleapis.com/auth/gmail.readonly']
-    
-    creds = service_account.Credentials.from_service_account_info(
-        key_dict, 
-        scopes=scopes
-    ).with_subject(Config.USER_EMAIL)
-    
-    return build('gmail', 'v1', credentials=creds)
-
-def renew_gmail_watch():
-    """Triggers the Gmail API watch command"""
-    try:
-        service = get_gmail_service()
-        body = {'topicName': Config.TOPIC_ID, 'labelIds': ['INBOX']}
-        result = service.users().watch(userId='me', body=body).execute()
-        print(f"Gmail Watch renewed. Expiration: {result.get('expiration')}")
-    except Exception as e:
-        print(f"Watch renewal failed: {e}")
 
 @app.post("/process")
 async def process_webhook(data: dict = Body(...)):
@@ -61,7 +32,7 @@ async def process_webhook(data: dict = Body(...)):
             return Response(status_code=200)
 
         if not task_exists:
-            task = EmailTasks(message_id=message_id, status="PROCESSING")
+            task = EmailTasks(message_id=message_id, status="PROCESSING") # type: ignore
             session.add(task)
             session.commit()
 

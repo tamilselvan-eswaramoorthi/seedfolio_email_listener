@@ -30,6 +30,22 @@ class GetHoldingsFromGmail:
         self.nse_query = "from:nse-direct@nse.co.in"
         self.bse_query = "from:mgrpt@bseindia.com"
 
+    def _credentials_expiry(self, expiry):
+        if not expiry:
+            return None
+        if expiry.tzinfo:
+            return expiry.astimezone(timezone.utc).replace(tzinfo=None)
+        return expiry
+
+    def _store_credentials(self, session, user_token, creds):
+        token_dict = json.loads(creds.to_json())
+        user_token.token = token_dict.get("token", user_token.token)
+        if "expiry" in token_dict and token_dict["expiry"]:
+            expiry = datetime.fromisoformat(token_dict["expiry"].replace("Z", "+00:00"))
+            user_token.expiry = expiry.astimezone(timezone.utc).replace(tzinfo=None)
+        session.add(user_token)
+        session.commit()
+
     def _get_user_details(self, user_id: str):
         with db_handler.get_session() as session:
             user = session.exec(select(User).where(User.user_id == user_id)).first()
@@ -46,19 +62,14 @@ class GetHoldingsFromGmail:
                     token_uri=user_token.token_uri,
                     client_id=user_token.client_id,
                     client_secret=user_token.client_secret,
-                    scopes=user_token.scopes.split(",") if user_token.scopes else self.SCOPES
+                    scopes=user_token.scopes.split(",") if user_token.scopes else self.SCOPES,
+                    expiry=self._credentials_expiry(user_token.expiry)
                 )
             
             if not creds or not creds.valid:
-                if creds and creds.expired and creds.refresh_token:
+                if creds and creds.refresh_token:
                     creds.refresh(Request())
-                    # Update DB with new tokens
-                    token_dict = json.loads(creds.to_json())
-                    user_token.token = token_dict.get("token", user_token.token) # type: ignore
-                    if "expiry" in token_dict and token_dict["expiry"]:
-                        user_token.expiry = datetime.fromisoformat(token_dict["expiry"].replace("Z", "+00:00")) # type: ignore
-                    session.add(user_token)
-                    session.commit()
+                    self._store_credentials(session, user_token, creds)
                 else:
                     raise Exception("No valid credentials found for user. User must re-authenticate.")
                     

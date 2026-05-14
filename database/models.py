@@ -45,8 +45,8 @@ class Holdings(SQLModel, table=True):
 class GoogleOAuthToken(SQLModel, table=True):
     id: str = Field(primary_key=True, max_length=36)
     user_id: str = Field(foreign_key="user.user_id", max_length=36, unique=True)
-    token: str = Field(max_length=500)
-    refresh_token: Optional[str] = Field(default=None, max_length=500)
+    token: str = Field(max_length=2048)
+    refresh_token: Optional[str] = Field(default=None, max_length=2048)
     token_uri: str = Field(max_length=255)
     client_id: str = Field(max_length=255)
     client_secret: str = Field(max_length=255)
