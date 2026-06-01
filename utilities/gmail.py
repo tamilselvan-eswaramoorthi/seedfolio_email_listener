@@ -8,6 +8,7 @@ from sqlmodel import select
 
 from datetime import datetime, timezone
 
+from google.auth.exceptions import RefreshError
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
@@ -68,12 +69,42 @@ class GetHoldingsFromGmail:
             
             if not creds or not creds.valid:
                 if creds and creds.refresh_token:
-                    creds.refresh(Request())
-                    self._store_credentials(session, user_token, creds)
+                    try:
+                        creds.refresh(Request())
+                        self._store_credentials(session, user_token, creds)
+                    except RefreshError as e:
+                        raise Exception("Google OAuth token expired or revoked. Please re-authenticate the application.") from e
                 else:
                     raise Exception("No valid credentials found for user. User must re-authenticate.")
                     
         self.service = build("gmail", "v1", credentials=creds)
+
+    def force_reauthenticate(self):
+        """Force refresh the credentials to get a new access token and verify connectivity."""
+        with db_handler.get_session() as session:
+            user_token = session.exec(select(GoogleOAuthToken).where(GoogleOAuthToken.user_id == Config.TRANSACTIONS_USER_ID)).first()
+            if not user_token:
+                raise Exception("No credentials found in database to refresh.")
+            
+            creds = Credentials(
+                token=user_token.token,
+                refresh_token=user_token.refresh_token,
+                token_uri=user_token.token_uri,
+                client_id=user_token.client_id,
+                client_secret=user_token.client_secret,
+                scopes=user_token.scopes.split(",") if user_token.scopes else self.SCOPES,
+                expiry=self._credentials_expiry(user_token.expiry)
+            )
+            
+            if creds.refresh_token:
+                try:
+                    creds.refresh(Request())
+                    self._store_credentials(session, user_token, creds)
+                    print("Credentials successfully refreshed and stored via scheduled re-authentication.")
+                except RefreshError as e:
+                    raise Exception("Google OAuth token has expired or been revoked. Manual re-authentication required.") from e
+            else:
+                raise Exception("No refresh token available to perform background re-authentication.")
 
     def get_attachments_in_memory(self, user_id, msg_id, payload):
         attachments = []
