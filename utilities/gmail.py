@@ -25,11 +25,15 @@ class GetHoldingsFromGmail:
         self.user_id = None
         self.PASSWORD = None
         self.SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
-        self.authenticate()
         self.zerodha_query = "from:no-reply-transaction-with-holding-statement@reportsmailer.zerodha.net"
         self.cas_query = "from:eCAS@cdslstatement.com"
         self.nse_query = "from:nse-direct@nse.co.in"
         self.bse_query = "from:mgrpt@bseindia.com"
+        self.auth_error = None
+        try:
+            self.authenticate()
+        except Exception as e:
+            self.auth_error = e
 
     def _credentials_expiry(self, expiry):
         if not expiry:
@@ -95,16 +99,21 @@ class GetHoldingsFromGmail:
                 scopes=user_token.scopes.split(",") if user_token.scopes else self.SCOPES,
                 expiry=self._credentials_expiry(user_token.expiry)
             )
-            
+            print (creds)
             if creds.refresh_token:
                 try:
                     creds.refresh(Request())
                     self._store_credentials(session, user_token, creds)
                     print("Credentials successfully refreshed and stored via scheduled re-authentication.")
+                    self.authenticate()
+                    self.auth_error = None
                 except RefreshError as e:
-                    raise Exception("Google OAuth token has expired or been revoked. Manual re-authentication required.") from e
+                    import traceback
+                    traceback.print_exc()
+                    # raise Exception("Google OAuth token has expired or been revoked. Manual re-authentication required.") from e
             else:
-                raise Exception("No refresh token available to perform background re-authentication.")
+                pass
+                # raise Exception("No refresh token available to perform background re-authentication.")
 
     def get_attachments_in_memory(self, user_id, msg_id, payload):
         attachments = []
@@ -121,8 +130,18 @@ class GetHoldingsFromGmail:
                 data = part["body"].get("data")
                 
                 if attachment_id:
-                    attachment = self.service.users().messages().attachments().get( # type: ignore
-                        userId=user_id, messageId=msg_id, id=attachment_id).execute()
+                    try:
+                        attachment = self.service.users().messages().attachments().get( # type: ignore
+                            userId=user_id, messageId=msg_id, id=attachment_id).execute()
+                    except Exception as e:
+                        if "invalid" in str(e).lower() or "credential" in str(e).lower() or "401" in str(e):
+                            print("Credential error during attachment download. Attempting force re-authentication and retry...")
+                            self.force_reauthenticate()
+                            self.authenticate()
+                            attachment = self.service.users().messages().attachments().get( # type: ignore
+                                userId=user_id, messageId=msg_id, id=attachment_id).execute()
+                        else:
+                            raise e
                     data = attachment.get("data")
                 
                 if data:
@@ -418,12 +437,24 @@ class GetHoldingsFromGmail:
         Args:
             message_id (str): The ID of the email message to process.
         """
+        if self.auth_error:
+            raise self.auth_error
 
         try:
             msg = self.service.users().messages().get(userId="me", id=message_id).execute() # type: ignore
         except Exception as e:
-            print(f"Error fetching message {message_id}: {e}")
-            return {'status': 500, 'message': f"Error fetching message: {e}"}
+            if "invalid" in str(e).lower() or "credential" in str(e).lower() or "401" in str(e):
+                print("Credential error during API call. Attempting force re-authentication and retry...")
+                try:
+                    self.force_reauthenticate()
+                    self.authenticate()
+                    msg = self.service.users().messages().get(userId="me", id=message_id).execute()
+                except Exception as retry_err:
+                    print(f"Retry after force re-authentication failed: {retry_err}")
+                    return {'status': 500, 'message': f"Error fetching message after reauth retry: {retry_err}"}
+            else:
+                print(f"Error fetching message {message_id}: {e}")
+                return {'status': 500, 'message': f"Error fetching message: {e}"}
         
         sender = None
         user_email = None

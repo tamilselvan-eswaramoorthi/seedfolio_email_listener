@@ -62,18 +62,29 @@ async def process_webhook(data: dict = Body(...)):
             session.commit()
 
     # Process outside of the initial session to avoid keeping transaction open
-    try:
-        gmail = GetHoldingsFromGmail()
-        ret = gmail.process_transactions(message_id)
-        print(f"Processing result for message ID {message_id}: {ret}")
-        status = "COMPLETED"
-        status_code = 200
-        response_content = "Processing completed successfully"
-    except Exception as e:
-        print(f"Failed to process message ID {message_id}: {e}")
-        status = "FAILED"
-        status_code = 500
-        response_content = f"Failed to process message: {str(e)}"
+    max_retries = 3
+    retry_delay = 5  # seconds
+    
+    for attempt in range(max_retries):
+        try:
+            gmail = GetHoldingsFromGmail()
+            ret = gmail.process_transactions(message_id)
+            print(f"Processing result for message ID {message_id}: {ret}")
+            status = "COMPLETED"
+            status_code = 200
+            response_content = "Processing completed successfully"
+            break
+        except Exception as e:
+            print(f"Failed to process message ID {message_id} on attempt {attempt + 1}: {e}")
+            if ("expired" in str(e).lower() or "revoked" in str(e).lower() or "credentials" in str(e).lower()) and attempt < max_retries - 1:
+                print(f"Token expired/revoked error. Waiting {retry_delay}s for potential database token update/re-auth before retrying...")
+                await asyncio.sleep(retry_delay)
+                continue
+            
+            status = "FAILED"
+            status_code = 500
+            response_content = f"Failed to process message: {str(e)}"
+            break
 
     with db_handler.get_session() as session:
         task = session.exec(select(EmailTasks).where(EmailTasks.message_id == message_id)).first()
@@ -88,6 +99,11 @@ async def process_webhook(data: dict = Body(...)):
 def health_check():
     return {"status": "healthy"}
 
+@app.get("/reauth")
+def force_reauth():
+    gmail = GetHoldingsFromGmail()
+    gmail.force_reauthenticate()
+    return {"status": "reauthenticated"}
 
 if __name__ == "__main__":
     import uvicorn
